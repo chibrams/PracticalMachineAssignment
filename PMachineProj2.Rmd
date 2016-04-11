@@ -1,0 +1,109 @@
+---
+title: "Prediction Assignment"
+author: "kamel Chehboun"
+date: "April 10, 2016"
+output: html_document
+---
+
+##Background
+
+Using devices such as JawboneUp, NikeFuelBand, and Fitbitit is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Preparing the data and R packages
+###Load packages
+```{r, cache = T}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+### Getting Data
+```{r, cache = T}
+# URL of the training and testing data
+if(!dir.exists('./Data')) {
+  dir.create('./Data')
+}
+
+# Check of pml-training.csv file exists in Data folder
+if(file.exists("./Data/pml-training.csv") == FALSE) {
+  fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  download.file(fileUrl, destfile = "./Data/pml-training.csv", mode = "wb")
+}
+
+# Check of pml-testing.csv file exists in Data folder
+if(file.exists("./Data/pml-testing.csv") == FALSE) {
+  fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  download.file(fileUrl, destfile = "./Data/pml-testing.csv", mode = "wb")
+}
+
+# Read in the training and testing datasets
+trainRaw <- read.csv("./Data/pml-training.csv", header=TRUE, na.strings = c("","NA"))
+testRaw <- read.csv("./Data/pml-testing.csv", header=TRUE, na.strings = c("","NA"))
+
+dim(trainRaw)
+dim(testRaw)
+```
+The raw training data has 19622 rows of observations and 160 features (predictors). Column X is unusable row number. While the testing data has 20 rows and the same 160 features. There is one column of target outcome named classe.
+
+### Data cleaning
+here, we will clean the data and removing of observations with missing values as well as some meaningless variables.
+```{r, cache = T}
+sum(complete.cases(trainRaw))
+```
+Removing all columns with NA values
+```{r, cache = T}
+cols.without.na = colSums(is.na(testRaw)) == 0
+trainRaw = trainRaw[, cols.without.na]
+testRaw = testRaw[, cols.without.na]
+```  
+Removing columns that do not contribute to the accelerometer measurements.
+```{r, cache = T}
+classe <- trainRaw$classe
+trainRem <- grepl("^X|timestamp|window", names(trainRaw))
+trainRaw <- trainRaw[, !trainRem]
+trainClean <- trainRaw[, sapply(trainRaw, is.numeric)]
+trainClean$classe <- classe
+testRem <- grepl("^X|timestamp|window", names(testRaw))
+testRaw <- testRaw[, !testRem]
+testClean <- testRaw[, sapply(testRaw, is.numeric)]
+```
+
+
+### Split the data
+Then, splitting the cleaned training set into a pure training data set (70%) and a validation data set (30%). We will use the validation data set to conduct cross validation in future steps.  
+```{r, cache = T}
+set.seed(22519) # set random seed, for reproducibility
+inTrain <- createDataPartition(trainClean$classe, p=0.70, list=F)
+trainData <- trainClean[inTrain, ]
+testData <- trainClean[-inTrain, ]
+```
+
+## Data Modeling
+Now build a machine learning model to predict activity quality (classe outcome) from the activity monitors (the features or predictors) by using **Random Forest** algorithm. We will use **4-fold cross validation** when applying the algorithm.  
+```{r, cache = T}
+controlRf <- trainControl(method="cv", 4)
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf, ntree=250)
+modelRf
+```
+Then, we estimate the performance of the model on the validation data set.  
+```{r, cache = T}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+```
+```{r, cache = T}
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+```
+The average accuracy is 99.38%, with error rate is 0.62%. So, expected error rate of less than 1% is fulfilled.
+
+## Predicting the testing data
+Now, we apply the model to the original testing data set downloaded from the data source. We remove the `problem_id` column first.  
+```{r, cache = T}
+result <- predict(modelRf, testCleaned[, -length(names(testCleaned))])
+result
+```  
